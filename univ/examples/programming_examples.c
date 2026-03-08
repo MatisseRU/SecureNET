@@ -1,75 +1,84 @@
-#include "../platforms/linux/linux.c"
+#include "../../univ/snet_api.h"
+#include <stdio.h>
+#include <string.h>
+#if defined(SNET_ENABLE_OPENSSL)
+#include <openssl/evp.h>
+#endif
 
-
-//USAGE EXAMPLE OF OPENSSL IN THE PROJECT
+// USAGE EXAMPLE OF OPENSSL IN THE PROJECT
 int main(void)
 {
-    EVP_PKEY *pkey = SN_keygenRSA();
+#if !defined(SNET_ENABLE_OPENSSL)
+    fprintf(stderr, "OpenSSL is disabled. Rebuild with USE_OPENSSL=1 to run this example.\n");
+    return 1;
+#else
+    int rc = 1;
+    EVP_PKEY *pkey = SNET_keygenRSA();
+    EVP_PKEY *pubkey = NULL;
+    EVP_PKEY *privkey = NULL;
+    unsigned char *encrypted = NULL;
+    unsigned char *decrypted = NULL;
+
     if (!pkey) {
-        fprintf(stderr, "Error generating key pair\n");
-        return 1;
+        fprintf(stderr, "Error generating key pair (OpenSSL disabled or unavailable)\n");
+        goto cleanup;
     }
 
-    // Sauvegarder les clés
     if (!save_private_key(pkey, "private.pem") || !save_public_key(pkey, "public.pem")) {
-        fprintf(stderr, "Error saving the private key\n");
-        EVP_PKEY_free(pkey);
-        return 1;
+        fprintf(stderr, "Error saving keys\n");
+        goto cleanup;
     }
-    if (DEBUG)
-    {
-        printf("RSA key pair generated and saved\n");
-    }
-    
 
-    // Charger clé publique pour chiffrement
-    EVP_PKEY *pubkey = load_public_key("public.pem");
+    pubkey = load_public_key("public.pem");
     if (!pubkey) {
         fprintf(stderr, "Error while loading public key\n");
-        EVP_PKEY_free(pkey);
-        return 1;
+        goto cleanup;
     }
 
     const char *message = "Bonjour, OpenSSL EVP RSA!";
-    unsigned char *encrypted = NULL;
-    int encrypted_len = SN_encryptRSA(pubkey, (const unsigned char *)message, strlen(message), &encrypted);
+    int encrypted_len = SNET_encryptRSA(pubkey, (const unsigned char *)message, strlen(message), &encrypted);
     if (encrypted_len < 0) {
         fprintf(stderr, "Failed to encrypt packet\n");
-        EVP_PKEY_free(pubkey);
-        EVP_PKEY_free(pkey);
-        return 1;
+        goto cleanup;
     }
-    printf("Packet crypted: (%d bytes)\n", encrypted_len);
 
-    // Charger clé privée pour déchiffrement
-    EVP_PKEY *privkey = load_private_key("private.pem");
+    privkey = load_private_key("private.pem");
     if (!privkey) {
         fprintf(stderr, "Error while loading private key\n");
-        OPENSSL_free(encrypted);
-        EVP_PKEY_free(pubkey);
-        EVP_PKEY_free(pkey);
-        return 1;
+        goto cleanup;
     }
 
-    unsigned char *decrypted = NULL;
-    int decrypted_len = SN_decryptRSA(privkey, encrypted, encrypted_len, &decrypted);
+    int decrypted_len = SNET_decryptRSA(privkey, encrypted, (size_t)encrypted_len, &decrypted);
     if (decrypted_len < 0) {
         fprintf(stderr, "Failed to decrypt packet\n");
-        OPENSSL_free(encrypted);
-        EVP_PKEY_free(pubkey);
-        EVP_PKEY_free(privkey);
-        EVP_PKEY_free(pkey);
-        return 1;
+        goto cleanup;
     }
 
     printf("Decrypted packet: %s\n", decrypted);
+    rc = 0;
 
-    // Libération
-    OPENSSL_free(encrypted);
-    OPENSSL_free(decrypted);
-    EVP_PKEY_free(pubkey);
-    EVP_PKEY_free(privkey);
-    EVP_PKEY_free(pkey);
+cleanup:
+    if (encrypted != NULL)
+    {
+        OPENSSL_free(encrypted);
+    }
+    if (decrypted != NULL)
+    {
+        OPENSSL_free(decrypted);
+    }
+    if (pubkey != NULL)
+    {
+        EVP_PKEY_free(pubkey);
+    }
+    if (privkey != NULL)
+    {
+        EVP_PKEY_free(privkey);
+    }
+    if (pkey != NULL)
+    {
+        EVP_PKEY_free(pkey);
+    }
 
-    EVP_cleanup();
+    return rc;
+#endif
 }
